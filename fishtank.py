@@ -16,6 +16,7 @@ from datetime import datetime
 import random
 import threading
 import pyHS100
+import configparser
 
 # Raspberry Pi pin configuration:
 RST = None     # on the PiOLED this pin isnt used
@@ -55,22 +56,26 @@ font = ImageFont.truetype('04b30font.ttf', 16)
 
 button = Button(4) # GPIO 4 and Ground next to it
 
-plugIP = "IPADDRESS" 
-plug = pyHS100.SmartPlug(plugIP)
+config = configparser.ConfigParser()
+config.read("config.ini")
 
-screenOffTime = time.time() + 60
+plug = pyHS100.SmartPlug(config['Lighting']['LightIP'])
+
 screenOn = True
-
 lightsOn = False
-lightsOffTime = 0
-
 fishFedMorning = False
 fishFedNight = False
-fishFeedingTimeMorning = 9
-fishFeedingTimeNight = 22
 
-scriptStartTime = time.time()
+fishFeedingTimeMorning = config['Feeding']['FeedTimeMorning']
+fishFeedingTimeNight = config['Feeding']['FeedTimeNight']
+
 debug = False
+
+SendMorningMessage = config['Feeding']['SendMorningMessage']
+SendNightMessage = config['Feeding']['SendNightMessage']
+
+screenOffTime = time.time() + 60
+scriptStartTime = time.time()
 
 def logger(msg):
     print(datetime.now().strftime("%y-%m-%d %H:%M:%S") + " " + str(msg))
@@ -85,26 +90,27 @@ def feedFish():
         logger("<Fish Feeder> Fish are now fed")
     elif getCurrentTimeRange() == "night":
         fishFedNight = True
-        lightsOffTime = time.time() + (60 * 15)
         logger("<Fish Feeder> Fish are now fed")
    
 
 def sendHungryMessage(feedingTime=""):
+    global config
+    
     logger("<Fish Texter> Sending fish hungry text")
     if debug:
         return
     fish = random.randint(1,5)
     ID = ""
     if fish == 1:
-        ID = "TelegramBotAPIKEY1"
+        ID = config['BotAPIKeys']['Bot1']
     elif fish == 2:
-        ID = "TelegramBotAPIKEY2"
+        ID = config['BotAPIKeys']['Bot2']
     elif fish == 3:
-        ID = "TelegramBotAPIKEY3"
+        ID = config['BotAPIKeys']['Bot3']
     elif fish == 4:
-        ID = "TelegramBotAPIKEY4"
+        ID = config['BotAPIKeys']['Bot4']
     elif fish == 5:
-        ID = "TelegramBotAPIKEY5"
+        ID = config['BotAPIKeys']['Bot5']
     else:
         logger("<ERROR> Invalid fish ID")
 
@@ -113,11 +119,12 @@ def sendHungryMessage(feedingTime=""):
             "Ack! Where's all the food?",
             "Wot in tarnation? We weren\'t fed!",
             "Eeeeeek hungry!",
-            "Shweta! I want food!"]
+            "Shweta! I want food!",
+            "Bleep bloop I'm a robofish who's hungry"]
 
     textChoice = random.randint(0,len(textChoices)-1)
 
-    command = "curl -i -X GET \"https://api.telegram.org/bot" + ID + "/sendMessage?chat_id=USERID&text=" + textChoices[textChoice] + "\""
+    command = "curl -i -X GET \"https://api.telegram.org/bot" + ID + "/sendMessage?chat_id=" + config['Users']['ChatID'] + "&text=" + textChoices[textChoice] + "\""
     process = subprocess.run([command], check=True, stdout=subprocess.PIPE, universal_newlines=True, shell=True)
     output = process.stdout
     
@@ -139,10 +146,12 @@ def watchFedStatus():
             fishFedNight = False
         
         elif getCurrentTimeRange() == "morning" and fishFedMorning == False and currentHour >= fishFeedingTimeMorning + 1:
-                sendHungryMessage("morning")
+                if(sendMorningMessage):
+                    sendHungryMessage("morning")
 
         elif getCurrentTimeRange() == "night" and fishFedNight == False and (currentHour >= fishFeedingTimeNight + 1 or currentHour < 2):
-                sendHungryMessage("night")
+                if(sendNightMessage):
+                    sendHungryMessage("night")
             
         time.sleep(60 * 60)
 
@@ -179,12 +188,13 @@ def sleepTimer():
 def getCurrentTimeRange():
     global fishFeedingTimeMorning
     global fishFeedingTimeNight
+    global config
 
     currentTime = int(datetime.now().strftime("%H"))
     
-    if currentTime > fishFeedingTimeMorning - 3 and currentTime < fishFeedingTimeMorning + 6:
+    if currentTime >= config['Feeding']['MorningStart'] and currentTime < config['Feeding']['MorningEnd']:
         return "morning"
-    elif currentTime > fishFeedingTimeNight - 3 or currentTime < 4:
+    elif currentTime >= config['Feeding']['NightStart'] or currentTime < config['Feeding']['NightEnd']:
         return "night"
     else:
         return "none"
@@ -225,24 +235,21 @@ def toggleLights(mode):
 
 def lightingController():
     global lightsOn
-    global lightsOffTime
     global fishFedNight
+    global config
 
     while True: 
-        currentTimeH = int(datetime.now().strftime("%H"))
-    
-        if lightsOn and currentTimeH < 8:
-            if lightsOffTime != 0 and time.time() > lightsOffTime:
-                # turn off lights
-                logger("<Lighting Controller> Turning off lights")
-                toggleLights("off")
-
-        elif (not lightsOn and currentTimeH >= 8) or (not lightsOn and currentTimeH < 2 and fishFedNight == False):
-            # turn on lights
+        currentTimeH = datetime.now().strftime("%H")
+        litHours = config['Lighting']['OnHours' + datetime.now().strftime("%A")]
+        
+        if currentTimeH in litHours and not lightsOn:
             logger("<Lighting Controller> Turning on lights")
-            lightsOffTime = 0
             toggleLights("on")
-
+            
+        elif currentTimeH not in litHours and not lightsOff:
+            logger("<Lighting Controller> Turning off lights")
+            toggleLights("off")
+            
         time.sleep(60)
 
 
@@ -252,7 +259,7 @@ def screenController():
         # Draw a black filled box to clear the image
         draw.rectangle((0,0,width,height), outline=0, fill=0)
 
-        if time.time() < screenOffTime:
+        if screenOn:
 
             # Write lines of text
             draw.text((x, top+4), "Fish are",  font=font, fill=255)
