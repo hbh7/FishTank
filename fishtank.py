@@ -17,6 +17,8 @@ import random
 import threading
 import pyHS100
 import configparser
+import json
+import requests
 
 # Raspberry Pi pin configuration:
 RST = None     # on the PiOLED this pin isnt used
@@ -66,8 +68,8 @@ lightsOn = False
 fishFedMorning = False
 fishFedNight = False
 
-fishFeedingTimeMorning = config['Feeding']['FeedTimeMorning']
-fishFeedingTimeNight = config['Feeding']['FeedTimeNight']
+fishFeedingTimeMorning = int(config['Feeding']['FeedTimeMorning'])
+fishFeedingTimeNight = int(config['Feeding']['FeedTimeNight'])
 
 debug = False
 
@@ -127,6 +129,43 @@ def sendHungryMessage(feedingTime=""):
     command = "curl -i -X GET \"https://api.telegram.org/bot" + ID + "/sendMessage?chat_id=" + config['Users']['ChatID'] + "&text=" + textChoices[textChoice] + "\""
     process = subprocess.run([command], check=True, stdout=subprocess.PIPE, universal_newlines=True, shell=True)
     output = process.stdout
+    
+def listenToMessages():
+    global config
+    
+    lastMessageID = 0
+    
+    ID = config['BotAPIKeys']['Bot1']
+
+    textChoices = ["Help! I\'m hungry!",
+            "Okie I guess we've been fed",
+            "Oh sorry",
+            "Whoopsies",
+            "Gotcha fam",
+            "Sir yes sir!"]
+            
+    keywords = ['fed', 'stop', 'shut up', 'ate']
+
+    while True:
+    
+        command = "https://api.telegram.org/bot" + ID + "/getUpdates?offset=" + str(lastMessageID)
+        result = json.loads((requests.get(command)).text)['result']
+        
+        
+        for r in result:
+            lastMessageID = r['update_id'] + 1
+            if 'message' in r:
+                for keyword in keywords:
+                    if keyword in r['message']['text']:
+                        logger("<Message Listener> Silencing text received, replying...")
+                        textChoice = random.randint(0,len(textChoices)-1)
+                        command = "curl -i -X GET \"https://api.telegram.org/bot" + ID + "/sendMessage?chat_id=" + config['Users']['ChatID'] + "&text=" + textChoices[textChoice] + "\""
+                        process = subprocess.run([command], check=True, stdout=subprocess.PIPE, universal_newlines=True, shell=True)
+                        output = process.stdout
+                        feedFish()
+                        break
+        
+        time.sleep(5)
     
 
 def watchFedStatus():
@@ -192,9 +231,9 @@ def getCurrentTimeRange():
 
     currentTime = int(datetime.now().strftime("%H"))
     
-    if currentTime >= config['Feeding']['MorningStart'] and currentTime < config['Feeding']['MorningEnd']:
+    if currentTime >= int(config['Feeding']['MorningStart']) and currentTime < int(config['Feeding']['MorningEnd']):
         return "morning"
-    elif currentTime >= config['Feeding']['NightStart'] or currentTime < config['Feeding']['NightEnd']:
+    elif currentTime >= int(config['Feeding']['NightStart']) or currentTime < int(config['Feeding']['NightEnd']):
         return "night"
     else:
         return "none"
@@ -279,6 +318,7 @@ threading.Thread(target=watchForButton).start()
 threading.Thread(target=sleepTimer).start()
 threading.Thread(target=lightingController).start()
 threading.Thread(target=screenController).start()
+threading.Thread(target=listenToMessages).start()
 
 
 if __name__ == "__main__":
