@@ -64,7 +64,7 @@ config.read("config.ini")
 plug = pyHS100.SmartPlug(config['Lighting']['LightIP'])
 
 screenOn = True
-lightsOn = False
+lightsOn = None
 fishFedMorning = False
 fishFedNight = False
 
@@ -173,6 +173,9 @@ def watchFedStatus():
     global fishFedNight
     global fishFeedingTimeNight
     global fishFeedingTimeMorning
+    global sendMorningMessage
+    global sendNightMessage
+
 
     while True:
         if time.time() < scriptStartTime + (60 * 5):
@@ -181,6 +184,7 @@ def watchFedStatus():
         currentHour = int(datetime.now().strftime("%H"))
 
         if currentHour > 4 and currentHour < 6:
+            logger("<WatchFedStatus> Resetting fed statuses")
             fishFedMorning = False
             fishFedNight = False
         
@@ -276,6 +280,8 @@ def lightingController():
     global lightsOn
     global fishFedNight
     global config
+    
+    toggleLights("off")
 
     while True: 
         currentTimeH = datetime.now().strftime("%H")
@@ -285,7 +291,7 @@ def lightingController():
             logger("<Lighting Controller> Turning on lights")
             toggleLights("on")
             
-        elif currentTimeH not in litHours and not lightsOff:
+        elif currentTimeH not in litHours and lightsOn:
             logger("<Lighting Controller> Turning off lights")
             toggleLights("off")
             
